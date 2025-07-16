@@ -13,10 +13,12 @@ type Attendee = {
 };
 
 
-
 export default function AdminDashboard() {
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const router = useRouter();
 
   const handleLogout = async () => {
@@ -33,21 +35,29 @@ export default function AdminDashboard() {
     });
   }, []);
 
+
   useEffect(() => {
     const fetchAttendees = async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('attendees')
-        .select('*')
-        .order('created_at', { ascending: false });
-      console.log({ data });
+        .select('*');
+
+      // Filter by status
+      if (statusFilter !== 'all') {
+        query = query.eq('status', statusFilter);
+      }
+
+      // Sort by registration date
+      query = query.order('created_at', { ascending: sortOrder === 'asc' });
+
+      const { data, error } = await query;
       if (error) console.error(error);
       else setAttendees(data as Attendee[]);
-
       setLoading(false);
     };
-
+    setLoading(true);
     fetchAttendees();
-  }, []);
+  }, [statusFilter, sortOrder]);
 
   const updateStatus = async (id: string, newStatus: Attendee['status'], attendee?: Attendee) => {
     const { error } = await supabase
@@ -84,34 +94,71 @@ if (loading) return (
   </div>
 );
 
+  // Filter attendees by search
+  const filteredAttendees = attendees.filter(att =>
+    att.name.toLowerCase().includes(search.toLowerCase()) ||
+    att.email.toLowerCase().includes(search.toLowerCase())
+  );
+
   return (
-    <div className="container">
-      <div className="header">
-        <h1>RSVP Dashboard</h1>
-        <button onClick={handleLogout} className="danger">Logout</button>
-      </div>
-      {attendees.length === 0 ? (
-        <div className="card" style={{textAlign: 'center', color: '#888'}}>No RSVPs yet.</div>
-      ) : (
-        attendees.map(att => (
-          <div key={att.id} className="card">
-            <div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
-              <span style={{fontWeight:'bold', fontSize:'1.1em'}}>{att.name}</span>
-              <span className={`status ${att.status}`}>{att.status.replace('_',' ')}</span>
-            </div>
-            <div>Email: <b>{att.email}</b></div>
-            <div>Phone: <b>{att.phone || 'N/A'}</b></div>
-            <div>Plus one: <b>{att.plus_one ? 'Yes' : 'No'}</b></div>
-            <div style={{fontSize:'0.9em', color:'#888'}}>RSVP at {new Date(att.created_at).toLocaleString()}</div>
-            {att.status === 'pending' && (
-              <div style={{marginTop:'1em', display:'flex', gap:'1em'}}>
-                <button className="primary" onClick={() => updateStatus(att.id, 'accepted', att)}>Accept</button>
-                <button className="danger" onClick={() => updateStatus(att.id, 'rejected')}>Reject</button>
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 to-blue-50 py-8 px-2">
+      <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-lg p-8 border border-amber-100">
+        <div className="flex flex-col sm:flex-row items-center justify-between mb-8 gap-4">
+          <h1 className="text-3xl font-bold text-amber-600 tracking-tight">RSVP Dashboard</h1>
+          <button onClick={handleLogout} className="bg-red-500 hover:bg-red-600 text-white px-5 py-2 rounded-lg font-semibold shadow transition">Logout</button>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3 mb-6">
+          <input
+            type="text"
+            placeholder="Search by name or email"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 shadow-sm"
+          />
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 shadow-sm">
+            <option value="all">All Statuses</option>
+            <option value="pending">Pending</option>
+            <option value="accepted">Accepted</option>
+            <option value="rejected">Rejected</option>
+            <option value="checked_in">Checked In</option>
+          </select>
+          <select value={sortOrder} onChange={e => setSortOrder(e.target.value as 'asc' | 'desc')} className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300 shadow-sm">
+            <option value="desc">Newest First</option>
+            <option value="asc">Oldest First</option>
+          </select>
+        </div>
+        {filteredAttendees.length === 0 ? (
+          <div className="text-center text-gray-400 text-lg py-12">No RSVPs yet.</div>
+        ) : (
+          <div className="space-y-6">
+            {filteredAttendees.map(att => (
+              <div key={att.id} className="bg-gradient-to-br from-white to-amber-50 border border-amber-100 rounded-xl shadow p-6">
+                <div className="flex flex-col sm:flex-row items-center justify-between mb-2 gap-2">
+                  <span className="font-semibold text-lg text-gray-800">{att.name}</span>
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold capitalize shadow-sm 
+                    ${att.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : ''}
+                    ${att.status === 'accepted' ? 'bg-green-100 text-green-700' : ''}
+                    ${att.status === 'rejected' ? 'bg-red-100 text-red-700' : ''}
+                    ${att.status === 'checked_in' ? 'bg-blue-100 text-blue-700' : ''}
+                  `}>{att.status.replace('_',' ')}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1 text-gray-700 text-sm mb-2">
+                  <div>Email: <span className="font-medium">{att.email}</span></div>
+                  <div>Phone: <span className="font-medium">{att.phone || 'N/A'}</span></div>
+                  <div>Plus one: <span className="font-medium">{att.plus_one ? 'Yes' : 'No'}</span></div>
+                  <div>RSVP at <span className="font-medium">{new Date(att.created_at).toLocaleString()}</span></div>
+                </div>
+                {att.status === 'pending' && (
+                  <div className="flex gap-4 mt-4">
+                    <button className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-semibold shadow transition" onClick={() => updateStatus(att.id, 'accepted', att)}>Accept</button>
+                    <button className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-semibold shadow transition" onClick={() => updateStatus(att.id, 'rejected')}>Reject</button>
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </div>
-        ))
-      )}
+        )}
+      </div>
     </div>
   );
 }

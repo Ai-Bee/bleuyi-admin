@@ -1,10 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/router';
 import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function CheckInScanner() {
+  const router = useRouter();
+  // Redirect if not logged in
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (!data.user) {
+        router.push('/admin/login');
+      }
+    });
+  }, [router]);
   const scannerRef = useRef<HTMLDivElement>(null);
   const [message, setMessage] = useState('');
+  const [loadingCheckIn, setLoadingCheckIn] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [attendee, setAttendee] = useState<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,35 +60,44 @@ export default function CheckInScanner() {
 
   const handleCheckIn = async (data: string) => {
     setMessage('');
-    const extractedId = data.replace('wedding-attendee:', '');
+    setLoadingCheckIn(true);
+    try {
+      const extractedId = data.replace('wedding-attendee:', '');
+      const { data: match, error } = await supabase
+        .from('attendees')
+        .select('*')
+        .eq('id', extractedId)
+        .single();
 
-    const { data: match, error } = await supabase
-      .from('attendees')
-      .select('*')
-      .eq('id', extractedId)
-      .single();
+      if (error || !match) {
+        setMessage('Attendee not found ❌');
+        setLoadingCheckIn(false);
+        return;
+      }
 
-    if (error || !match) {
-      setMessage('Attendee not found ❌');
-      return;
-    }
+      if (match.status === 'checked_in') {
+        setMessage(`${match.name} has already been checked in ❗`);
+        setAttendee(match);
+        setLoadingCheckIn(false);
+        return;
+      }
 
-    if (match.status === 'checked_in') {
-      setMessage(`${match.name} has already been checked in ❗`);
-      setAttendee(match);
-      return;
-    }
+      const { error: updateError } = await supabase
+        .from('attendees')
+        .update({ status: 'checked_in' })
+        .eq('id', extractedId);
 
-    const { error: updateError } = await supabase
-      .from('attendees')
-      .update({ status: 'checked_in' })
-      .eq('id', extractedId);
-
-    if (updateError) {
-      setMessage('Check-in failed ⚠️');
-    } else {
-      setMessage(`${match.name} is now checked in ✅`);
-      setAttendee(match);
+      if (updateError) {
+        setMessage('Check-in failed ⚠️');
+      } else {
+        setMessage(`${match.name} is now checked in ✅`);
+        setAttendee(match);
+      }
+    } catch (e) {
+      console.error(e);
+      setMessage('Network or server error. Please try again.');
+    } finally {
+      setLoadingCheckIn(false);
     }
   };
 
@@ -99,7 +119,9 @@ export default function CheckInScanner() {
 
       {message && (
         <div className="mt-4 text-center text-sm font-medium">
-          {message.includes('✅') ? (
+          {loadingCheckIn ? (
+            <p className="text-blue-600">Processing...</p>
+          ) : message.includes('✅') ? (
             <p className="text-green-600">{message}</p>
           ) : (
             <p className="text-red-600">{message}</p>
@@ -161,22 +183,31 @@ export default function CheckInScanner() {
 
           {a.status !== 'checked_in' ? (
             <button
-              className="mt-2 bg-green-600 text-white px-3 py-1 rounded"
+              className="mt-2 bg-green-600 text-white px-3 py-1 rounded disabled:opacity-50"
+              disabled={loadingCheckIn}
               onClick={async () => {
-                const { error } = await supabase
-                  .from('attendees')
-                  .update({ status: 'checked_in' })
-                  .eq('id', a.id);
-
-                if (!error) {
-                  setMessage(`${a.name} checked in manually ✅`);
-                  setAttendee(a);
-                } else {
-                  setMessage('Error checking in');
+                setLoadingCheckIn(true);
+                setMessage('');
+                try {
+                  const { error } = await supabase
+                    .from('attendees')
+                    .update({ status: 'checked_in' })
+                    .eq('id', a.id);
+                  if (!error) {
+                    setMessage(`${a.name} checked in manually ✅`);
+                    setAttendee(a);
+                  } else {
+                    setMessage('Error checking in');
+                  }
+                } catch (e) {
+                  console.error(e);
+                  setMessage('Network or server error. Please try again.');
+                } finally {
+                  setLoadingCheckIn(false);
                 }
               }}
             >
-              Check In
+              {loadingCheckIn ? 'Checking in...' : 'Check In'}
             </button>
           ) : (
             <div className="text-red-500 text-xs mt-1">Already checked in</div>

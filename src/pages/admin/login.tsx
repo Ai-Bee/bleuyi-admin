@@ -32,9 +32,9 @@ export default function AdminLogin() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <form
         onSubmit={handleLogin}
-        className="bg-white p-6 rounded-lg shadow-md w-full max-w-sm space-y-4"
+        className="bg-slate-200/15 p-6 rounded-lg shadow-md w-full max-w-sm space-y-4"
       >
-        <h2 className="text-xl font-bold text-center">Admin Login</h2>
+        <h2 className="text-xs font-bold text-center">Admin Login</h2>
 
         {errorMsg && <p className="text-red-600 text-sm">{errorMsg}</p>}
 
