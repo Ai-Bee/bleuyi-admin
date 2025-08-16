@@ -73,7 +73,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ]);
 
     return res.status(200).json({ success: true, data });
-  } catch (err: any) {
+  } catch (err) {
     console.error('[RSVP ERROR]', err);
     return res.status(500).json({ error: 'An unexpected error occurred.' });
   }
