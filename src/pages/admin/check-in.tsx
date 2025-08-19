@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
+import Navbar from '@/components/Navbar';
 import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -14,6 +15,7 @@ export default function CheckInScanner() {
     });
   }, [router]);
   const scannerRef = useRef<HTMLDivElement>(null);
+  const qrInstanceRef = useRef<Html5Qrcode | null>(null);
   const [message, setMessage] = useState('');
   const [loadingCheckIn, setLoadingCheckIn] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,74 +28,72 @@ export default function CheckInScanner() {
   useEffect(() => {
     if (!scannerActive) return;
     const scannerId = 'qr-scanner';
-    if (!scannerRef.current || scannedId) return;
-
-    const html5QrCode = new Html5Qrcode(scannerId);
-    let selectedCameraId = null;
-    let loadingTimeout: NodeJS.Timeout = setTimeout(() => {
-      setLoadingCheckIn(false);
-    }, 8000);
+    if (!scannerRef.current) return;
 
     setMessage('');
     setLoadingCheckIn(true);
+
+    let isMounted = true;
+    let selectedCameraId = null;
+
     Html5Qrcode.getCameras().then(cameras => {
+      if (!isMounted) return;
       if (cameras && cameras.length) {
-        // Prefer back camera (environment facing)
         const backCam = cameras.find(cam => cam.label.toLowerCase().includes('back') || cam.label.toLowerCase().includes('environment'));
         selectedCameraId = backCam ? backCam.id : cameras[0].id;
 
-        html5QrCode.start(
+        const qr = new Html5Qrcode(scannerId);
+        qrInstanceRef.current = qr;
+        qr.start(
           selectedCameraId,
           {
             fps: 15,
-            qrbox: { width: 250, height: 250 }, // square box
+            qrbox: { width: 250, height: 250 },
             aspectRatio: 1.0,
           },
           async (decodedText: string) => {
+            if (!isMounted) return;
             if (decodedText === scannedId) return; // avoid duplicate scans
             setScannedId(decodedText);
             setLoadingCheckIn(true);
             await handleCheckIn(decodedText);
-            // Only stop if scanner is running
-            if (html5QrCode.getState && html5QrCode.getState() === 2) {
-              html5QrCode.stop().then(() => {
-                setLoadingCheckIn(false);
-                setScannerActive(false);
-                console.log('Scanner stopped');
-              });
-            }
+            setLoadingCheckIn(false);
+            // Camera stays open for further scans
           },
           error => {
-            // Only show error if not loading
+            if (!isMounted) return;
             if (!loadingCheckIn) setMessage('QR scan error. Try again.');
             console.warn('QR scan error', error);
           }
-        );
+        ).then(() => {
+          if (!isMounted) return;
+          setLoadingCheckIn(false);
+        }).catch(() => {
+          if (!isMounted) return;
+          setMessage('Unable to start camera.');
+          setLoadingCheckIn(false);
+        });
       } else {
         setMessage('No camera found.');
         setLoadingCheckIn(false);
         setScannerActive(false);
       }
     }).catch(() => {
+      if (!isMounted) return;
       setMessage('Unable to access camera.');
       setLoadingCheckIn(false);
       setScannerActive(false);
     });
 
-    // Timeout loading state if camera takes too long
-    loadingTimeout = setTimeout(() => {
-      setLoadingCheckIn(false);
-    }, 8000);
-
     return () => {
-      clearTimeout(loadingTimeout);
-      // Only stop if scanner is running
-      if (html5QrCode.getState && html5QrCode.getState() === 2) {
-        html5QrCode.stop().catch(() => {});
+      isMounted = false;
+      if (qrInstanceRef.current && qrInstanceRef.current.getState && qrInstanceRef.current.getState() === 2) {
+        qrInstanceRef.current.stop().catch(() => {});
       }
+      qrInstanceRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scannerActive, scannedId, loadingCheckIn]);
+  }, [scannerActive]);
 
   const handleCheckIn = async (data: string) => {
     setMessage('');
@@ -142,8 +142,7 @@ export default function CheckInScanner() {
     setAttendee(null);
     setMessage('');
     setScannedId(null);
-    // Keep camera open after scan unless user closes it
-    // setScannerActive(false); // Only close if user clicks 'Close Camera'
+    // Camera stays open for further scans
   };
 
   const closeScanner = () => {
@@ -151,18 +150,18 @@ export default function CheckInScanner() {
     setScannedId(null);
     setAttendee(null);
     setMessage('');
+    if (qrInstanceRef.current && qrInstanceRef.current.getState && qrInstanceRef.current.getState() === 2) {
+      qrInstanceRef.current.stop().catch(() => {});
+    }
+    qrInstanceRef.current = null;
   };
 
   return (
-    <div className="p-2 sm:p-4 min-h-screen bg-gray-50 flex flex-col items-center">
+    <>
+      <Navbar />
+      <div className="p-2 sm:p-4 min-h-screen bg-gray-50 flex flex-col items-center">
       <header className="w-full flex items-center justify-between mb-2 sm:mb-4">
         <h1 className="text-xl sm:text-2xl font-bold">Check-in Scanner</h1>
-        <button
-          className="text-blue-600 text-sm px-3 py-1 rounded border border-blue-600 hover:bg-blue-50"
-          onClick={() => router.push('/admin/dashboard')}
-        >
-          Home
-        </button>
       </header>
 
       {!scannerActive && !scannedId && (
@@ -314,6 +313,7 @@ export default function CheckInScanner() {
           <p className="text-base text-gray-500">No results yet.</p>
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }

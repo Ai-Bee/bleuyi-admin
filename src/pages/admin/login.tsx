@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '@/lib/supabaseClient';
+import Image from 'next/image';
+import coupleLogo from '@/assets/couple-logo.png';
 
 export default function AdminLogin() {
   const router = useRouter();
@@ -29,7 +31,10 @@ export default function AdminLogin() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center flex-col justify-center bg-gray-50">
+      <div className="mb-6">
+        <Image src={coupleLogo} alt="Couple Logo" width={120} height={120} priority className="mx-auto rounded-full" />
+      </div>
       <form
         onSubmit={handleLogin}
         className="bg-slate-200/15 p-6 rounded-lg shadow-md w-full max-w-sm space-y-4"
