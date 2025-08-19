@@ -17,7 +17,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   await NextCors(req, res, {
     origin: [
       'https://blu-dbqh.onrender.com',
-      'http://localhost:3000',
+      'http://localhost:5173',
     ],
     methods: ['POST'],
     credentials: true,
