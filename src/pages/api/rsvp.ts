@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { createClient } from '@supabase/supabase-js';
-// import NextCors from 'nextjs-cors';
+import NextCors from 'nextjs-cors';
 
 // Temporary rate limiter using memory (reset on server restart)
 const ipRateLimitMap = new Map<string, { count: number; timestamp: number }>();
@@ -14,14 +14,21 @@ const supabase = createClient(
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // CORS setup: allow specific origins (add your frontend and 3rd party URLs)
-  // await NextCors(req, res, {
-  //   origin: [
-  //     'https://blu-dbqh.onrender.com',
-  //     'http://localhost:3000',
-  //   ],
-  //   methods: ['POST'],
-  //   credentials: true,
-  // });
+  await NextCors(req, res, {
+    origin: [
+      'https://blu-dbqh.onrender.com',
+      'http://localhost:3000',
+    ],
+    methods: ['POST'],
+    credentials: true,
+  });
+  //  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  // res.setHeader('Access-Control-Allow-Origin', '*'); // change to partner domain
+  // res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  // res.setHeader(
+  //   'Access-Control-Allow-Headers',
+  //   'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  // );
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
   const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '') as string;
