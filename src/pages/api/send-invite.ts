@@ -17,7 +17,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const { id, name, email } = req.body;
 
-  if (!id || !name || !email) {
+  if (!id || !name) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
@@ -66,6 +66,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (updateResult.error) {
       console.error('[SUPABASE DB UPDATE ERROR]', updateResult.error);
       return res.status(500).json({ error: updateResult.error.message || 'Failed to update attendee with QR info' });
+    }
+
+    // If no email provided, skip sending and return success
+    if (!email) {
+      return res.status(200).json({
+        success: true,
+        message: 'QR created and attendee updated; no email provided, skipped sending.',
+        sentEmail: null,
+      });
     }
 
     // Send email

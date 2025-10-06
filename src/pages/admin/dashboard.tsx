@@ -78,7 +78,7 @@ export default function AdminDashboard() {
           body: JSON.stringify({
             id: attendee.id,
             name: attendee.name,
-            email: attendee.email,
+            email: attendee.email || '',
           }),
         });
       }
@@ -145,8 +145,8 @@ if (loading) return (
                     `}>{att.status.replace('_',' ')}</span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1 text-gray-700 text-sm mb-2">
-                    <div>Email: <span className="font-medium">{att.email}</span></div>
-                    <div>Phone: <span className="font-medium">{att.phone || 'N/A'}</span></div>
+                    <div>Email: <span className="font-medium">{att.email ?? 'Not Available' }</span></div>
+                    <div>Phone: <span className="font-medium">{att.phone || 'Not Available'}</span></div>
                     <div>Plus one: <span className="font-medium">{att.plus_one ? 'Yes' : 'No'}</span></div>
                     <div>RSVP at <span className="font-medium">{new Date(att.created_at).toLocaleString()}</span></div>
                   </div>

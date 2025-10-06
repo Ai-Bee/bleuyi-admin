@@ -215,8 +215,8 @@ export default function CheckInScanner() {
       {attendee && (
         <div className="mt-4 border p-4 rounded-lg bg-white text-base max-w-xs w-full mx-auto shadow">
           <div className="mb-2"><strong>Name:</strong> {attendee.name}</div>
-          <div className="mb-2"><strong>Email:</strong> {attendee.email}</div>
-          <div className="mb-2"><strong>Phone:</strong> {attendee.phone || 'N/A'}</div>
+          <div className="mb-2"><strong>Email:</strong> {attendee.email ?? 'Not Available'}</div>
+          <div className="mb-2"><strong>Phone:</strong> {attendee.phone || 'Not Available'}</div>
           <div className="mb-2"><strong>Plus One:</strong> {attendee.plus_one ? 'Yes' : 'No'}</div>
 
           <div className="flex gap-2 mt-4">

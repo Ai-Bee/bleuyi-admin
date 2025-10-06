@@ -48,14 +48,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   ipRateLimitMap.set(ip, record);
 
   // 📥 Extract + validate inputs
-  const { name, email, phone } = req.body;
-  if (!name || !email || typeof name !== 'string' || typeof email !== 'string') {
+  const { name, email='', phone } = req.body;
+  if (!name || typeof name !== 'string') {
     return res.status(400).json({ error: 'Name and email are required.' });
   }
 
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
-    return res.status(400).json({ error: 'Invalid email format.' });
+  if (email && typeof email === 'string') {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format.' });
+    }
   }
 
   try {
@@ -63,7 +65,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const { data: existing } = await supabase
       .from('attendees')
       .select('id')
-      .eq('email', email)
+      .eq('email', email || '')
       .maybeSingle();
 
     if (existing) {
