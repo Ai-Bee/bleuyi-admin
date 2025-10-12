@@ -61,15 +61,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    // 🔎 Check for duplicate
-    const { data: existing } = await supabase
-      .from('attendees')
-      .select('id')
-      .eq('email', email || '')
-      .maybeSingle();
+    // 🔎 Check for duplicate (only when a non-empty email is provided)
+    const hasEmail = typeof email === 'string' && email.trim() !== '';
+    if (hasEmail) {
+      const { data: existing } = await supabase
+        .from('attendees')
+        .select('id')
+        .eq('email', email.trim())
+        .maybeSingle();
 
-    if (existing) {
-      return res.status(409).json({ error: 'RSVP already submitted for this email.' });
+      if (existing) {
+        return res.status(409).json({ error: 'RSVP already submitted for this email.' });
+      }
     }
 
     // ✅ Insert new attendee
