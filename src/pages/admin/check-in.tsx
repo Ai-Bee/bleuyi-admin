@@ -1,11 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import Navbar from '@/components/Navbar';
-import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function CheckInScanner() {
   const router = useRouter();
+  type Attendee = {
+    id: string;
+    name: string;
+    email?: string | null;
+    phone?: string | null;
+    plus_one?: boolean | null;
+    status: 'pending' | 'checked_in' | string;
+  };
   // Redirect if not logged in
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -14,305 +21,249 @@ export default function CheckInScanner() {
       }
     });
   }, [router]);
-  const scannerRef = useRef<HTMLDivElement>(null);
-  const qrInstanceRef = useRef<Html5Qrcode | null>(null);
   const [message, setMessage] = useState('');
-  const [loadingCheckIn, setLoadingCheckIn] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [attendee, setAttendee] = useState<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [manualResults, setManualResults] = useState<any[]>([]);
-  const [scannedId, setScannedId] = useState<string | null>(null);
-  const [scannerActive, setScannerActive] = useState(false);
+  // const scannerRef = useRef<HTMLDivElement>(null);
+  // const qrInstanceRef = useRef<Html5Qrcode | null>(null);
+  // const [scannedId, setScannedId] = useState<string | null>(null);
+  // const [scannerActive, setScannerActive] = useState(false);
+  const [attendees, setAttendees] = useState<Attendee[]>([]);
+  const [loadingAttendees, setLoadingAttendees] = useState(true);
+  const [search, setSearch] = useState('');
+  const [checkingIds, setCheckingIds] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<'all' | 'checked_in' | 'pending'>('all');
 
+  // Load all attendees initially so the list shows completely by default
   useEffect(() => {
-    if (!scannerActive) return;
-    const scannerId = 'qr-scanner';
-    if (!scannerRef.current) return;
-
-    setMessage('');
-    setLoadingCheckIn(true);
-
-    let isMounted = true;
-    let selectedCameraId = null;
-
-    Html5Qrcode.getCameras().then(cameras => {
-      if (!isMounted) return;
-      if (cameras && cameras.length) {
-        const backCam = cameras.find(cam => cam.label.toLowerCase().includes('back') || cam.label.toLowerCase().includes('environment'));
-        selectedCameraId = backCam ? backCam.id : cameras[0].id;
-
-        const qr = new Html5Qrcode(scannerId);
-        qrInstanceRef.current = qr;
-        qr.start(
-          selectedCameraId,
-          {
-            fps: 15,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0,
-          },
-          async (decodedText: string) => {
-            if (!isMounted) return;
-            if (decodedText === scannedId) return; // avoid duplicate scans
-            setScannedId(decodedText);
-            setLoadingCheckIn(true);
-            await handleCheckIn(decodedText);
-            setLoadingCheckIn(false);
-            // Camera stays open for further scans
-          },
-          error => {
-            if (!isMounted) return;
-            if (!loadingCheckIn) setMessage('QR scan error. Try again.');
-            console.warn('QR scan error', error);
-          }
-        ).then(() => {
-          if (!isMounted) return;
-          setLoadingCheckIn(false);
-        }).catch(() => {
-          if (!isMounted) return;
-          setMessage('Unable to start camera.');
-          setLoadingCheckIn(false);
-        });
-      } else {
-        setMessage('No camera found.');
-        setLoadingCheckIn(false);
-        setScannerActive(false);
-      }
-    }).catch(() => {
-      if (!isMounted) return;
-      setMessage('Unable to access camera.');
-      setLoadingCheckIn(false);
-      setScannerActive(false);
-    });
-
-    return () => {
-      isMounted = false;
-      if (qrInstanceRef.current && qrInstanceRef.current.getState && qrInstanceRef.current.getState() === 2) {
-        qrInstanceRef.current.stop().catch(() => {});
-      }
-      qrInstanceRef.current = null;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scannerActive]);
-
-  const handleCheckIn = async (data: string) => {
-    setMessage('');
-    setLoadingCheckIn(true);
-    try {
-      const extractedId = data.replace('wedding-attendee:', '');
-      const { data: match, error } = await supabase
+    let mounted = true;
+    const load = async () => {
+      setLoadingAttendees(true);
+      const { data, error } = await supabase
         .from('attendees')
         .select('*')
-        .eq('id', extractedId)
-        .single();
-
-      if (error || !match) {
-        setMessage('Attendee not found ❌');
-        setLoadingCheckIn(false);
-        return;
+        .order('name', { ascending: true });
+      if (!mounted) return;
+      if (error) {
+        console.error(error);
+        setAttendees([]);
+      } else {
+        setAttendees((data || []) as Attendee[]);
       }
+      setLoadingAttendees(false);
+    };
+    load();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
-      if (match.status === 'checked_in') {
-        setMessage(`${match.name} has already been checked in ❗`);
-        setAttendee(match);
-        setLoadingCheckIn(false);
-        return;
-      }
+  const filteredAttendees = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let base = attendees;
+    if (q) {
+      base = base.filter((a) =>
+        (a.name || '').toLowerCase().includes(q) ||
+        (a.email || '').toLowerCase().includes(q) ||
+        (a.phone || '').toLowerCase().includes(q)
+      );
+    }
+    if (statusFilter !== 'all') {
+      base = base.filter((a) => a.status === statusFilter);
+    }
+    return base;
+  }, [attendees, search, statusFilter]);
 
-      const { error: updateError } = await supabase
+  const stats = useMemo(() => {
+    const total = attendees.length;
+    const checked = attendees.filter((a) => a.status === 'checked_in').length;
+    return { total, checked, pending: total - checked };
+  }, [attendees]);
+
+  // NOTE: QR scanner feature is disabled for now.
+  // useEffect(() => { /* Scanner disabled */ }, []);
+
+  // const handleCheckIn = async (data: string) => { /* Scanner disabled */ };
+
+  const manualCheckIn = async (a: Attendee) => {
+    setMessage('');
+    setCheckingIds((s) => new Set(s).add(a.id));
+    try {
+      const { error } = await supabase
         .from('attendees')
         .update({ status: 'checked_in' })
-        .eq('id', extractedId);
-
-      if (updateError) {
-        setMessage('Check-in failed ⚠️');
+        .eq('id', a.id);
+      if (!error) {
+        setMessage(`${a.name} checked in ✅`);
+        setAttendees((prev) => prev.map((x) => (x.id === a.id ? { ...x, status: 'checked_in' } : x)));
       } else {
-        setMessage(`${match.name} is now checked in ✅`);
-        setAttendee(match);
+        setMessage('Error checking in');
       }
     } catch (e) {
       console.error(e);
       setMessage('Network or server error. Please try again.');
     } finally {
-      setLoadingCheckIn(false);
+      setCheckingIds((s) => {
+        const n = new Set(s);
+        n.delete(a.id);
+        return n;
+      });
     }
   };
-
-  const resetScanner = () => {
-    setAttendee(null);
+  const undoCheckIn = async (a: Attendee) => {
     setMessage('');
-    setScannedId(null);
-    // Camera stays open for further scans
-  };
-
-  const closeScanner = () => {
-    setScannerActive(false);
-    setScannedId(null);
-    setAttendee(null);
-    setMessage('');
-    if (qrInstanceRef.current && qrInstanceRef.current.getState && qrInstanceRef.current.getState() === 2) {
-      qrInstanceRef.current.stop().catch(() => {});
+    setCheckingIds((s) => new Set(s).add(a.id));
+    try {
+      const { error } = await supabase
+        .from('attendees')
+        .update({ status: 'pending' })
+        .eq('id', a.id);
+      if (!error) {
+        setMessage(`${a.name} reverted to pending ⏪`);
+        setAttendees((prev) => prev.map((x) => (x.id === a.id ? { ...x, status: 'pending' } : x)));
+      } else {
+        setMessage('Error undoing check-in');
+      }
+    } catch (e) {
+      console.error(e);
+      setMessage('Network or server error. Please try again.');
+    } finally {
+      setCheckingIds((s) => {
+        const n = new Set(s);
+        n.delete(a.id);
+        return n;
+      });
     }
-    qrInstanceRef.current = null;
   };
+  // const resetScanner = () => { /* Scanner disabled */ };
+  // const closeScanner = () => { /* Scanner disabled */ };
 
   return (
     <>
       <Navbar />
-      <div className="p-2 sm:p-4 min-h-screen bg-gray-50 flex flex-col items-center">
-      <header className="w-full flex items-center justify-between mb-2 sm:mb-4">
-        <h1 className="text-xl sm:text-2xl font-bold">Check-in Scanner</h1>
-      </header>
-
-      {!scannerActive && !scannedId && (
-        <div className="w-full max-w-xs mx-auto flex flex-col items-center">
-          <button
-            className="w-full bg-blue-600 text-white px-4 py-3 rounded-lg text-base font-semibold hover:bg-blue-700 mb-4"
-            onClick={() => setScannerActive(true)}
-          >
-            Start Scanner
-          </button>
-        </div>
-      )}
-
-      {scannerActive && !scannedId && (
-        <div className="w-full max-w-xs mx-auto flex flex-col items-center" ref={scannerRef}>
-          <div className="relative w-full aspect-square rounded-lg overflow-hidden shadow-lg border-2 border-blue-600">
-            <div id="qr-scanner" className="absolute inset-0 w-full h-full" />
-            {/* Visual scan area overlay */}
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="border-4 border-blue-500 rounded-lg w-48 h-48" style={{ boxSizing: 'border-box' }}></div>
+      <div className="min-h-screen bg-gray-50">
+        <div className="mx-auto max-w-6xl px-4 py-6">
+          <header className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h1 className="text-2xl font-bold tracking-tight">Event Check-in</h1>
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <span className="rounded-full bg-white px-3 py-1 shadow-sm">Total: <strong>{stats.total}</strong></span>
+              <span className="rounded-full bg-green-50 text-green-700 px-3 py-1 shadow-sm">Checked in: <strong>{stats.checked}</strong></span>
+              <span className="rounded-full bg-amber-50 text-amber-700 px-3 py-1 shadow-sm">Pending: <strong>{stats.pending}</strong></span>
             </div>
-            {loadingCheckIn && (
-              <div className="absolute inset-0 bg-white bg-opacity-70 flex items-center justify-center z-10">
-                <span className="text-blue-600 font-semibold animate-pulse">Loading camera...</span>
+          </header>
+
+          {message && (
+            <div className="mb-4">
+              <div className={`rounded-lg border px-4 py-3 text-sm shadow-sm ${message.includes('✅') ? 'border-green-200 bg-green-50 text-green-700' : message.includes('❌') || message.includes('⚠️') ? 'border-red-200 bg-red-50 text-red-700' : 'border-blue-200 bg-blue-50 text-blue-700'}`}>
+                {checkingIds.size > 0 ? 'Processing...' : message}
+              </div>
+            </div>
+          )}
+
+          <section className="rounded-xl border bg-white p-4 shadow-sm">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative w-full sm:max-w-sm">
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  type="text"
+                  placeholder="Search by name, email, or phone"
+                  className="w-full rounded-lg border px-4 py-3 text-sm outline-none ring-0 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-600 hover:bg-gray-200"
+                    aria-label="Clear search"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="flex shrink-0 rounded-lg border bg-gray-50 p-1 text-xs font-medium">
+                {[
+                  { key: 'all', label: 'All' },
+                  { key: 'checked_in', label: 'Checked In' }
+                ].map(btn => (
+                  <button
+                    key={btn.key}
+                    onClick={() => setStatusFilter(btn.key as 'all' | 'checked_in' | 'pending')}
+                    className={`rounded-md px-3 py-2 transition focus:outline-none focus:ring-2 focus:ring-blue-300 ${
+                      statusFilter === btn.key
+                        ? 'bg-white shadow-sm text-blue-700'
+                        : 'text-gray-600 hover:bg-white/70'
+                    }`}
+                    type="button"
+                  >
+                    {btn.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {loadingAttendees ? (
+              <div className="py-10 text-center text-sm text-gray-500">Loading attendees…</div>
+            ) : (
+              <div className="overflow-auto">
+                <table className="min-w-full table-auto border-collapse text-sm">
+                  <thead className="sticky top-0 z-10 bg-gray-50">
+                    <tr className="text-left text-xs text-gray-600">
+                      <th className="border-b px-3 py-3 font-semibold">Name</th>
+                      <th className="border-b px-3 py-3 font-semibold">Contact</th>
+                      <th className="border-b px-3 py-3 font-semibold">Plus One</th>
+                      <th className="border-b px-3 py-3 font-semibold">Status</th>
+                      <th className="border-b px-3 py-3 font-semibold">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredAttendees.map((a) => {
+                      const isChecked = a.status === 'checked_in';
+                      const isLoading = checkingIds.has(a.id);
+                      return (
+                        <tr key={a.id} className="hover:bg-gray-50">
+                          <td className="border-b px-3 py-3 font-medium">{a.name}</td>
+                          <td className="border-b px-3 py-3 text-gray-600">{a.email || a.phone || '—'}</td>
+                          <td className="border-b px-3 py-3">
+                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${a.plus_one ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                              {a.plus_one ? 'Yes' : 'No'}
+                            </span>
+                          </td>
+                          <td className="border-b px-3 py-3">
+                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${isChecked ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                              {isChecked ? 'Checked in' : 'Pending'}
+                            </span>
+                          </td>
+                          <td className="border-b px-3 py-3">
+                            {!isChecked ? (
+                              <button
+                                disabled={isLoading}
+                                onClick={() => manualCheckIn(a)}
+                                className={`rounded-lg px-3 py-2 text-xs font-semibold text-white shadow-sm ${isLoading ? 'bg-gray-400' : 'bg-green-600 hover:bg-green-700'}`}
+                              >
+                                {isLoading ? 'Checking…' : 'Check In'}
+                              </button>
+                            ) : (
+                              <button
+                                disabled={isLoading}
+                                onClick={() => undoCheckIn(a)}
+                                className={`rounded-lg px-3 py-2 text-xs font-semibold text-white shadow-sm ${isLoading ? 'bg-gray-400' : 'bg-purple-600 hover:bg-purple-700'}`}
+                              >
+                                {isLoading ? 'Reverting…' : 'Undo'}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {filteredAttendees.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-sm text-gray-500">No attendees match your search.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             )}
-            {/* Close Camera Button */}
-            <button
-              className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-lg text-xs font-semibold z-20 shadow hover:bg-red-700"
-              onClick={closeScanner}
-            >
-              Close Camera
-            </button>
-          </div>
-          <p className="mt-2 text-xs text-gray-500 text-center">Align QR code within the square</p>
+          </section>
         </div>
-      )}
-
-      {message && (
-        <div className="mt-4 text-center text-base font-medium w-full max-w-xs">
-          {loadingCheckIn ? (
-            <p className="text-blue-600 animate-pulse">Processing...</p>
-          ) : message.includes('✅') ? (
-            <p className="text-green-600">{message}</p>
-          ) : (
-            <p className="text-red-600">{message}</p>
-          )}
-        </div>
-      )}
-
-      {attendee && (
-        <div className="mt-4 border p-4 rounded-lg bg-white text-base max-w-xs w-full mx-auto shadow">
-          <div className="mb-2"><strong>Name:</strong> {attendee.name}</div>
-          <div className="mb-2"><strong>Email:</strong> {attendee.email ?? 'Not Available'}</div>
-          <div className="mb-2"><strong>Phone:</strong> {attendee.phone || 'Not Available'}</div>
-          <div className="mb-2"><strong>Plus One:</strong> {attendee.plus_one ? 'Yes' : 'No'}</div>
-
-          <div className="flex gap-2 mt-4">
-            <button
-              onClick={resetScanner}
-              className="w-1/2 bg-blue-600 text-white px-4 py-2 rounded-lg text-base font-semibold hover:bg-blue-700"
-            >
-              Scan Next
-            </button>
-            <button
-              onClick={closeScanner}
-              className="w-1/2 bg-red-600 text-white px-4 py-2 rounded-lg text-base font-semibold hover:bg-red-700"
-            >
-              Close Camera
-            </button>
-          </div>
-        </div>
-      )}
-
-      <hr className="my-8 w-full max-w-xs" />
-
-      <div className="w-full max-w-xs mx-auto">
-        <h2 className="text-lg font-semibold mb-2">Manual Check-in</h2>
-        <input
-          type="text"
-          placeholder="Search name or email"
-          onChange={async (e) => {
-            const query = e.target.value.toLowerCase();
-            if (!query) {
-              setManualResults([]);
-              return;
-            }
-
-            setLoadingCheckIn(true);
-            const { data, error } = await supabase
-              .from('attendees')
-              .select('*')
-              .or(`name.ilike.%${query}%,email.ilike.%${query}%`);
-
-            if (error) {
-              console.error(error);
-              setManualResults([]);
-            } else {
-              setManualResults(data || []);
-            }
-            setLoadingCheckIn(false);
-          }}
-          className="w-full border px-3 py-3 rounded-lg mb-3 text-base focus:outline-blue-600"
-        />
-
-        {manualResults.length > 0 ? (
-          <ul className="space-y-3">
-            {manualResults.map((a) => (
-              <li key={a.id} className="bg-white p-3 border rounded-lg shadow-sm text-base flex flex-col gap-1">
-                <div className="font-semibold">{a.name}</div>
-                <div className="text-gray-500 text-xs">{a.email}</div>
-                <div>Status: {a.status}</div>
-
-                {a.status !== 'checked_in' ? (
-                  <button
-                    className="mt-2 bg-green-600 text-white px-3 py-2 rounded-lg text-base font-semibold disabled:opacity-50"
-                    disabled={loadingCheckIn}
-                    onClick={async () => {
-                      setLoadingCheckIn(true);
-                      setMessage('');
-                      try {
-                        const { error } = await supabase
-                          .from('attendees')
-                          .update({ status: 'checked_in' })
-                          .eq('id', a.id);
-                        if (!error) {
-                          setMessage(`${a.name} checked in manually ✅`);
-                          setAttendee(a);
-                        } else {
-                          setMessage('Error checking in');
-                        }
-                      } catch (e) {
-                        console.error(e);
-                        setMessage('Network or server error. Please try again.');
-                      } finally {
-                        setLoadingCheckIn(false);
-                      }
-                    }}
-                  >
-                    {loadingCheckIn ? 'Checking in...' : 'Check In'}
-                  </button>
-                ) : (
-                  <div className="text-red-500 text-xs mt-1">Already checked in</div>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-base text-gray-500">No results yet.</p>
-        )}
-      </div>
       </div>
     </>
   );
